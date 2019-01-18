@@ -16,6 +16,12 @@ interface BotCommand {
         chat: TelegramChat,
         message: Message
     ): BaseResponse
+
+    fun TeamCityTelegramBot.sendTextMessage(text: String, chat: TelegramChat): BaseResponse =
+        sender.execute(SendMessage(chat.id, text))
+
+    fun TeamCityTelegramBot.sendTextMessageWithReply(text: String, chat: TelegramChat, message: Message): BaseResponse =
+        sender.execute(SendMessage(chat.id, text).replyToMessageId(message.messageId()))
 }
 
 val BotCommand.help: String
@@ -27,10 +33,10 @@ val ALL_COMMANDS = listOf(
     HelpCommand(),
     LoginCommand(),
     LogoutCommand(),
-    BranchFilterCommand(),
-    CheckBranchFilterCommand(),
-    BuildFilterCommand(),
-    CheckBuildFilterCommand()
+    FilterCommand(),
+    CheckFilterCommand(),
+    CountCommand(),
+    CommandsCommand()
 ).let {
     it.forEach { command ->
         if (command.name.length > 32) error("The command name must be no more than 32 characters")
@@ -39,14 +45,6 @@ val ALL_COMMANDS = listOf(
 }
 
 private val LOG = LoggerFactory.getLogger("bot-command")
-
-data class CommandContext(private val context: HashMap<String, Any> = hashMapOf()) {
-    fun clear() = context.clear()
-    operator fun get(key: String): Any? = context[key]
-    operator fun set(key: String, value: Any) {
-        context[key] = value
-    }
-}
 
 class LoginCommand : BotCommand {
     override val name: String = "login"
@@ -67,7 +65,7 @@ class LoginCommand : BotCommand {
             LOG.info("Attempting to enable notification with the wrong key `$key` in `$chat`")
             "Bad auth key"
         }
-        return bot.sender.execute(SendMessage(chat.id, text))
+        return bot.sendTextMessageWithReply(text, chat, message)
     }
 }
 
@@ -83,7 +81,7 @@ class LogoutCommand : BotCommand {
     ): BaseResponse {
         chat.isAuth = false
         LOG.info("Disable notification in $chat")
-        return bot.sender.execute(SendMessage(chat.id, "Notifications disabled"))
+        return bot.sendTextMessageWithReply("Notifications disabled", chat, message)
     }
 }
 
@@ -103,38 +101,26 @@ class HelpCommand : BotCommand {
                 separator = "\n----------\n",
                 transform = BotCommand::help
             ) else commands[args]?.help ?: "Couldn't find `$args` command"
-            sender.execute(SendMessage(chat.id, text))
+            sendTextMessageWithReply(text, chat, message)
         }
     }
 }
 
-class BranchFilterCommand : BotCommand {
-    override val name: String = "branch_filter"
-    override val usage: String = "/branch_filter <pattern>. Pattern example: `rr/.*`"
-    override val description: String = "Add filtering by branch"
+class FilterCommand : BotCommand {
+    override val name: String = "filter"
+    override val usage: String = "/filter <filter_name> <pattern>. Pattern example: `rr/.*`"
+    override val description: String = "Add filtering"
     override fun invoke(
         bot: TeamCityTelegramBot,
         user: TelegramUser,
         chat: TelegramChat,
         message: Message
     ): BaseResponse {
-        val text = createFilter(message.commandArguments) { chat.branchFilter = it }
-        return bot.sender.execute(SendMessage(chat.id, text))
-    }
-}
-
-class CheckBranchFilterCommand : BotCommand {
-    override val name: String = "branch_filter_check"
-    override val usage: String = "/branch_filter_check <branch_name>"
-    override val description: String = "Check current branch filter"
-    override fun invoke(
-        bot: TeamCityTelegramBot,
-        user: TelegramUser,
-        chat: TelegramChat,
-        message: Message
-    ): BaseResponse {
-        val text = checkFilter(message.commandArguments, chat.branchFilter)
-        return bot.sender.execute(SendMessage(chat.id, text))
+        val args = message.commandArguments
+        val (_, filterGetter) = chat.filterProperty(args.substringBefore(' '))
+        val text = if (filterGetter == null) help
+        else createFilter(args.substringAfter(' ')) { filterGetter.set(it) }
+        return bot.sendTextMessageWithReply(text, chat, message)
     }
 }
 
@@ -147,39 +133,58 @@ else try {
     "Syntax error"
 }
 
+class CheckFilterCommand : BotCommand {
+    override val name: String = "filter_check"
+    override val usage: String = "/filter_check <filter_name> <text>"
+    override val description: String = "Check filter"
+    override fun invoke(
+        bot: TeamCityTelegramBot,
+        user: TelegramUser,
+        chat: TelegramChat,
+        message: Message
+    ): BaseResponse {
+        val args = message.commandArguments
+        val (ok, filterGetter) = chat.filterProperty(args.substringBefore(' '))
+        val text = if (!ok) help else checkFilter(args.substringAfter(' '), filterGetter?.get())
+        return bot.sendTextMessageWithReply(text, chat, message)
+    }
+}
+
 private fun checkFilter(text: String, regex: Regex?): String = when {
-    text.isEmpty() -> "Missing branch name"
+    text.isEmpty() -> "Missing text"
     regex == null -> "No filter specified"
     else -> "Result: ${regex.matches(text)}"
 }
 
-class BuildFilterCommand : BotCommand {
-    override val name: String = "build_filter"
-    override val usage: String = "/build_filter <pattern>. Pattern example: `Kotlin_dev_Aggregate.*`"
-    override val description: String = "Add filtering by build configuration id"
+class CountCommand : BotCommand {
+    override val name: String = "count"
+    override val usage: String = "/count <name>"
+    override val description: String = "Get number of"
     override fun invoke(
         bot: TeamCityTelegramBot,
         user: TelegramUser,
         chat: TelegramChat,
         message: Message
     ): BaseResponse {
-        val text = createFilter(message.commandArguments) { chat.buildFilter = it }
-        return bot.sender.execute(SendMessage(chat.id, text))
+        val text = when (message.commandArguments) {
+            "running_builds" -> bot.service.runningBuildCount.toString()
+            else -> help
+        }
+        return bot.sender.execute(SendMessage(chat.id, text).replyToMessageId(message.messageId()))
     }
-
 }
 
-class CheckBuildFilterCommand : BotCommand {
-    override val name: String = "build_filter_check"
-    override val usage: String = "/build_filter_check <build_config_id>"
-    override val description: String = "Check current build filter"
+class CommandsCommand : BotCommand {
+    override val name: String = "commands"
+    override val usage: String = "/commands"
+    override val description: String = "Description like @BotFather"
     override fun invoke(
         bot: TeamCityTelegramBot,
         user: TelegramUser,
         chat: TelegramChat,
         message: Message
     ): BaseResponse {
-        val text = checkFilter(message.commandArguments, chat.buildFilter)
-        return bot.sender.execute(SendMessage(chat.id, text))
+        val text = ALL_COMMANDS.joinToString(separator = "\n") { "${it.name} - ${it.description}" }
+        return bot.sender.execute(SendMessage(chat.id, text).replyToMessageId(message.messageId()))
     }
 }

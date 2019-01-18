@@ -1,6 +1,5 @@
 package io.github.dimonchik0036.tcbot
 
-import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 import java.io.FileInputStream
 import java.io.IOException
@@ -8,35 +7,30 @@ import java.time.Instant
 import java.util.*
 import kotlin.system.exitProcess
 
-fun main(args: Array<String>): Unit = runBlocking {
-    try {
-        val config = Config(inputValues(args))
-        val handler = BuildHandler(this)
-        val teamCityService = TeamCityService(
-            serverUrl = config.serverUrl,
-            checkUpdatesDelayMillis = config.updatesDelay ?: 30_000,
-            checkProjectDelayMillis = config.projectsDelay ?: 600_000,
-            rootProjectsId = config.rootProjectId ?: emptySet(),
-            lastUpdate = Instant.now(),
-            buildHandler = handler,
-            authType = config.authType ?: Guest
-        )
-
-        val bot = TeamCityTelegramBot(
-            token = config.token,
-            creatorId = config.creatorId,
-            authKey = config.authKey,
-            commands = ALL_COMMANDS.associate { it.name to it },
-            teamCityService = teamCityService
-        )
-
-        handler.handlers = bot.buildHandlers()
-        bot.start()
-    } catch (e: Exception) {
-        println(e)
-        LoggerFactory.getLogger("main").warn("An error occurred during operation", e)
-        exitProcess(1)
-    }
+fun main(args: Array<String>): Unit = try {
+    val config = Config(inputValues(args))
+    val bot = TeamCityTelegramBot(
+        token = config.token,
+        creatorId = config.creatorId,
+        authKey = config.authKey,
+        commands = ALL_COMMANDS.associate { it.name to it }
+    )
+    val teamCityService = TeamCityService(
+        serverUrl = config.serverUrl,
+        checkUpdatesDelayMillis = config.updatesDelay ?: 30_000,
+        checkProjectDelayMillis = config.projectsDelay ?: 600_000,
+        rootProjectsId = config.rootProjectId ?: emptySet(),
+        lastUpdate = Instant.now(),
+        authType = config.authType ?: Guest,
+        handlers = bot.buildHandlers(),
+        cascadeMode = config.cascadeMode ?: CascadeMode.ONLY_ROOT
+    )
+    bot.start(teamCityService)
+    teamCityService.start()
+} catch (e: Exception) {
+    println(e)
+    LoggerFactory.getLogger("main").warn("An error occurred during operation", e)
+    exitProcess(1)
 }
 
 private fun inputValues(args: Array<String>): Map<String, String> {

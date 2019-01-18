@@ -2,7 +2,9 @@ package io.github.dimonchik0036.tcbot
 
 import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.User
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.reflect.KMutableProperty0
 
 class Manager<Key, Value> {
     private val map: ConcurrentHashMap<Key, Value> = ConcurrentHashMap()
@@ -20,7 +22,8 @@ class TelegramUser(
 ) {
     @Volatile
     var lastCommand: BotCommand? = null
-    val context: CommandContext = CommandContext()
+    @Volatile
+    var context: HashMap<String, Any>? = null
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -72,6 +75,12 @@ class TelegramChat(
             lastName = chat.lastName(),
             title = chat.title()
         )
+    }
+
+    fun filterProperty(name: String): Pair<Boolean, KMutableProperty0<Regex?>?> = when (name) {
+        "branch" -> true to this::branchFilter
+        "build_configuration" -> true to this::buildFilter
+        else -> false to null
     }
 }
 

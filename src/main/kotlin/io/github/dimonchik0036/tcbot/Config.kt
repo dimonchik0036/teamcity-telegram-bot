@@ -10,6 +10,7 @@ class Config(private val map: Map<String, String>) {
     val authKey: String? = option("auth_key")
     val updatesDelay: Long? = option("updates_delay", String::toLong)
     val projectsDelay: Long? = option("projects_delay", String::toLong)
+    val cascadeMode: CascadeMode? = option("cascade_mode") { CascadeMode.valueOf(this) }
     val rootProjectId: Set<ProjectId>? = option("root_project_id") {
         split(' ').map(String::trim).filterNot(String::isEmpty).map { ProjectId(it) }.toSet()
     }

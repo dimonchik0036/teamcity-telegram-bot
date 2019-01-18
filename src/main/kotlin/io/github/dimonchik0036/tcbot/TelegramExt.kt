@@ -28,3 +28,5 @@ val Message.commandArguments: String
         return if (text.length == entity.length()) ""
         else text.substring(entity.length()).trim()
     }
+
+val Message.commandArgumentsList: List<String> get() = commandArguments.split(" ").map(String::trim)

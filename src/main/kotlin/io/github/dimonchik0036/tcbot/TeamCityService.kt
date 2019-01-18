@@ -1,31 +1,33 @@
 package io.github.dimonchik0036.tcbot
 
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.teamcity.rest.*
 import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 private val LOG = LoggerFactory.getLogger("team-city-service")
 
 class TeamCityService(
     serverUrl: String,
     authType: AuthType = Guest,
+    private val cascadeMode: CascadeMode = CascadeMode.ONLY_ROOT,
+    private val handlers: Map<String, BuildHandler>,
     private var lastUpdate: Instant = Instant.now(),
     private val checkUpdatesDelayMillis: Long = 60_000,
     private val checkProjectDelayMillis: Long = 600_000,
-    private val rootProjectsId: Set<ProjectId> = emptySet(),
-    val buildHandler: BuildHandler
+    private val rootProjectsId: Set<ProjectId> = emptySet()
 ) {
     private val teamCityInstance = authType.teamCityInstance(serverUrl)
-    private val runningBuilds = hashSetOf<RunningBuild>()
+    private val myRunningBuilds: ConcurrentHashMap<Build, BuildContext> = ConcurrentHashMap()
 
-    val rooProjects: List<Project>
+    private val rooProjects: List<Project>
         get() = if (rootProjectsId.isEmpty()) listOf(teamCityInstance.rootProject())
         else rootProjectsId.map(teamCityInstance::project)
 
@@ -39,16 +41,25 @@ class TeamCityService(
         }
     }
 
-    var projectStructure: Map<Project, List<BuildConfiguration>> by RareUpdateLock(emptyMap())
+    fun runningBuilds(filter: (Map.Entry<Build, BuildContext>) -> Boolean): Map<Build, BuildContext> =
+        myRunningBuilds.filter(filter)
+
+    @Volatile
+    var runningBuildCount: Int = 0
         private set
 
-    var vcsRoots: Set<VcsRoot> by RareUpdateLock(emptySet())
+    @Volatile
+    var projectStructure: Map<Project, List<BuildConfiguration>> = emptyMap()
         private set
 
-    fun start(scope: CoroutineScope): Job = scope.launch {
+    @Volatile
+    var vcsRoots: Set<VcsRoot> = emptySet()
+        private set
+
+    fun start() = runBlocking<Unit> {
         LOG.debug("Start")
-        launch { startCheckUpdates() }
         launch { startCheckProjectStructure() }
+        launch { startCheckUpdates() }
     }
 
     private suspend fun startCheckUpdates() {
@@ -65,12 +76,12 @@ class TeamCityService(
     private fun checkUpdates() {
         LOG.debug("Start check updates")
         checkRunningBuilds()
-        checkNewBuilds()
+        checkNewBuilds(this::getNewBuilds)
         LOG.debug("End check updates")
     }
 
     private var lastBuildId: Long = 0
-    private fun checkNewBuilds() {
+    private fun checkNewBuilds(getter: (BuildConfigurationId) -> Sequence<Build>) {
         LOG.debug("Start check new builds (lastId=$lastBuildId, time=$lastUpdate)")
         var lastTime: ZonedDateTime = lastUpdate.atZone(ZoneId.of("UTC"))
 
@@ -78,21 +89,21 @@ class TeamCityService(
         projectStructure.forEach { (project, configurations) ->
             LOG.debug("Start check $project")
             configurations.forEach { buildConfiguration ->
-                getNewBuilds(buildConfiguration.id, lastUpdate).forEach inner@{ build ->
+                getter(buildConfiguration.id).forEach inner@{ build ->
+                    LOG.debug("Processed $build")
                     val id = build.id.stringId.toLong()
                     if (id <= oldMaxId) return@inner
                     if (id > lastBuildId) lastBuildId = id
 
                     LOG.debug("New build $build")
-                    if (build.state == BuildState.RUNNING) runningBuilds += BuildContext(
-                        project,
-                        buildConfiguration
-                    ) to build
+                    if (build.state == BuildState.RUNNING) {
+                        myRunningBuilds[build] = BuildContext(project, buildConfiguration)
+                    }
 
                     val startTime = build.startDateTime
                     if (startTime != null && startTime > lastTime) lastTime = startTime
 
-                    buildHandler(BuildContext(project, buildConfiguration), build)
+                    buildHandle(BuildContext(project, buildConfiguration), build)
                 }
             }
         }
@@ -103,34 +114,56 @@ class TeamCityService(
 
     private fun checkRunningBuilds() {
         LOG.debug("Start check running builds")
-        runningBuilds.removeIf { (context, build) ->
+        myRunningBuilds.filter { (build, context) ->
             val newResult = teamCityInstance.build(build.id)
-            if (newResult.state == BuildState.RUNNING) return@removeIf false
+            if (newResult.state == BuildState.RUNNING) return@filter false
             LOG.debug("Build $newResult is finish")
-            buildHandler(context, newResult)
+            buildHandle(context, newResult)
             true
-        }
+        }.forEach { build, context -> myRunningBuilds.remove(build, context) }
+        runningBuildCount = myRunningBuilds.count()
         LOG.debug("End check running builds")
     }
 
-    private fun getNewBuilds(configurationId: BuildConfigurationId, since: Instant): Sequence<Build> =
+    private fun buildHandle(buildContext: BuildContext, build: Build) {
+        handlers.forEach {
+            it.value(buildContext, build)
+        }
+    }
+
+    private fun getRunningBuilds() {
+        LOG.debug("Init running builds")
+        checkNewBuilds {
+            teamCityInstance.builds()
+                .fromConfiguration(it)
+                .onlyRunning()
+                .all()
+        }
+    }
+
+    private fun getNewBuilds(configurationId: BuildConfigurationId): Sequence<Build> =
         teamCityInstance.builds()
             .fromConfiguration(configurationId)
             .includeCanceled()
             .includeFailed()
             .includeRunning()
             .withAllBranches()
-            .since(since) // TODO: Replace with sinceBuild. Now this filter is not implemented in the teamcity-rest-client.
+            .since(lastUpdate) // TODO: Replace with sinceBuild. Now this filter is not implemented in the teamcity-rest-client.
             .all()
 
     private suspend fun startCheckProjectStructure() {
-        while (true) {
-            try {
+        try {
+            checkProjectStructure()
+            getRunningBuilds()
+            while (true) {
                 checkProjectStructure()
-            } catch (e: Exception) {
-                LOG.warn("Error on check project structure", e)
+                delay(checkProjectDelayMillis)
             }
-            delay(checkProjectDelayMillis)
+        } catch (e: CancellationException) {
+            LOG.debug("Cancel")
+            return
+        } catch (e: Exception) {
+            LOG.warn("Error on check project structure", e)
         }
     }
 
@@ -143,7 +176,10 @@ class TeamCityService(
         projects.forEach { project ->
             map[project] = project.buildConfigurations
         }
-        fillProjectStructure(projects.flatMap(Project::childProjects), map)
+        when (cascadeMode) {
+            CascadeMode.RECURSIVELY -> fillProjectStructure(projects.flatMap(Project::childProjects), map)
+            CascadeMode.ONLY_ROOT -> return
+        }
     }
 
     private fun checkProjectStructure() {
@@ -152,7 +188,6 @@ class TeamCityService(
         val map = hashMapOf<Project, List<BuildConfiguration>>()
         fillProjectStructure(rooProjects, map)
         projectStructure = map
-
         vcsRoots = teamCityInstance.vcsRoots().all().toSet()
 
         LOG.debug("End check project structure")
@@ -168,3 +203,8 @@ sealed class AuthType {
 
 object Guest : AuthType()
 class WithPassword(val username: String, val password: String) : AuthType()
+
+enum class CascadeMode {
+    RECURSIVELY,
+    ONLY_ROOT
+}

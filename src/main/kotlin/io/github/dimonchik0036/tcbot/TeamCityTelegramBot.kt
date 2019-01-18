@@ -11,7 +11,6 @@ import com.pengrad.telegrambot.request.SendMessage
 import com.pengrad.telegrambot.response.BaseResponse
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import org.slf4j.LoggerFactory
 
 
@@ -21,21 +20,22 @@ class TeamCityTelegramBot(
     token: String,
     val commands: Map<String, BotCommand>,
     private val creatorId: Long,
-    private val teamCityService: TeamCityService,
     private val authKey: String? = null
 ) {
+    lateinit var service: TeamCityService
     val sender = TelegramBot(token)
     val userManager = Manager<Int, TelegramUser>()
     val chatManager = Manager<Long, TelegramChat>()
 
-    fun start() = runBlocking {
+    fun start(service: TeamCityService) {
+        this.service = service
         LOG.debug("Start bot")
         try {
             sender.execute(SendMessage(creatorId, "Run"))
         } catch (e: Exception) {
             throw RuntimeException("Couldn't send message to creator", e)
         }
-        teamCityService.start(this)
+
         sender.setUpdatesListener { updates ->
             LOG.debug("Get updates")
             updates.forEach { update ->
@@ -47,15 +47,17 @@ class TeamCityTelegramBot(
         }
     }
 
-    fun buildHandlers(): Set<BuildContextHandler> = setOf(
-        BuildContextHandler("build info") { build ->
+    fun buildHandlers(): Map<String, BuildHandler> = mapOf(
+        "build info" to { build ->
             val description = createBuildDescriptionMarkdown(this, build)
             val branchName = build.branch.name
-            chatManager.forEach { _, chat ->
-                if (!chat.isAuth) return@forEach
-                if (chat.buildFilter?.matches(build.buildConfigurationId.stringId) == false) return@forEach
-                if (branchName == null || chat.branchFilter?.matches(branchName) == false) return@forEach
-                sender.execute(SendMessage(chat.id, description).parseMode(ParseMode.Markdown))
+            GlobalScope.launch {
+                chatManager.forEach { _, chat ->
+                    if (!chat.isAuth) return@forEach
+                    if (chat.buildFilter?.matches(build.buildConfigurationId.stringId) == false) return@forEach
+                    if (branchName == null || chat.branchFilter?.matches(branchName) == false) return@forEach
+                    sender.execute(SendMessage(chat.id, description).parseMode(ParseMode.Markdown))
+                }
             }
         }
     )
