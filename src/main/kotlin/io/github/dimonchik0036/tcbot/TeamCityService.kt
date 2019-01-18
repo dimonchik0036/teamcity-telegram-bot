@@ -106,8 +106,8 @@ class TeamCityService(
         runningBuilds.removeIf { (context, build) ->
             val newResult = teamCityInstance.build(build.id)
             if (newResult.state == BuildState.RUNNING) return@removeIf false
-            LOG.debug("Build $build is finish")
-            buildHandler(context, build)
+            LOG.debug("Build $newResult is finish")
+            buildHandler(context, newResult)
             true
         }
         LOG.debug("End check running builds")
