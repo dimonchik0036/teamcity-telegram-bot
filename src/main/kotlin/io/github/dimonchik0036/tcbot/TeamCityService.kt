@@ -38,7 +38,7 @@ class TeamCityService(
     //---------------------------------------------
 
     private val teamCityInstance = teamCityUser.teamCityInstance(serverUrl)
-    private val myRunningBuilds: MutableSet<TeamCityBuild> = hashSetOf()
+    private val myRunningBuilds: HashSet<TeamCityBuild> = hashSetOf()
 
     private val rooProjects: List<Project>
         get() = if (rootProjectsId.isEmpty()) listOf(teamCityInstance.rootProject())
@@ -111,12 +111,19 @@ class TeamCityService(
 
     private fun checkRunningBuilds() {
         LOG.debug("Start check running builds")
-        myRunningBuilds.removeIf {
+        runningBuilds.forEach {
             val build = teamCityInstance.build(BuildId(it.id))
-            if (build.state == BuildState.RUNNING) return@removeIf false
+            if (build.state == BuildState.RUNNING) {
+                if (build.status != it.status) {
+                    myRunningBuilds -= it
+                    myRunningBuilds += TeamCityBuild.fromBuild(build)
+                    LOG.info("Change status from ${it.status} to ${build.status} in $it")
+                }
+                return@forEach
+            }
             LOG.info("Build $build is finish")
             buildHandle(TeamCityBuild.fromBuild(build))
-            true
+            myRunningBuilds -= it
         }
         LOG.debug("End check running builds")
     }
