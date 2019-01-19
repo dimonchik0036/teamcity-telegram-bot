@@ -16,7 +16,7 @@ data class BotCommand(
         if (checkPermissions(user, chat)) handler(bot, user, chat, message)
         else {
             LOG.info("Not permitted launch $name to $user in $chat")
-            bot.sendTextMessage("Not permitted", chat, message)
+            bot.sendTextMessage("$NOT_PERMITTED Not permitted", chat, message)
         }
 
     private fun checkPermissions(user: TelegramUser, chat: TelegramChat): Boolean = !auth || chat.isAuth
@@ -25,6 +25,10 @@ data class BotCommand(
             "Usage: $usage\n" +
             "Description: $description"
 }
+
+private const val SUCCESS = "\u2705"
+private const val FAILED = "\u274c"
+private const val NOT_PERMITTED = "\ud83d\udeab"
 
 val ALL_COMMANDS = listOf(
     BotCommand(
@@ -107,10 +111,10 @@ private fun BotCommand.login(
     val text = if (bot.checkAuthKey(key)) {
         chat.isAuth = true
         LOG.info("Notifications enabled in $chat")
-        "Notifications enabled"
+        "$SUCCESS Notifications enabled"
     } else {
         LOG.info("Attempting to enable notification with the wrong key `$key` in `$chat`")
-        "Bad auth key"
+        "$FAILED Bad auth key"
     }
     bot.sendTextMessage(text, chat, message)
 }
