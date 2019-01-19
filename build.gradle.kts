@@ -19,6 +19,8 @@ dependencies {
     compile("ch.qos.logback:logback-classic:1.2.3")
     compile("org.jetbrains.teamcity:teamcity-rest-client:1.6.2")
     compile("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.1.0")
+    testCompile("org.jetbrains.kotlin:kotlin-test")
+    testCompile("org.jetbrains.kotlin:kotlin-test-junit")
 }
 
 tasks.withType<KotlinCompile> {
