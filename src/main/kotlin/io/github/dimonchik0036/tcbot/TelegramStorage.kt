@@ -19,10 +19,10 @@ class TelegramUser(
     val firstName: String,
     val lastName: String?
 ) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        return id == (other as TelegramUser).id
+    override fun equals(other: Any?): Boolean = when {
+        this === other -> true
+        javaClass != other?.javaClass -> false
+        else -> id == (other as TelegramUser).id
     }
 
     override fun hashCode(): Int = id
@@ -48,10 +48,10 @@ class TelegramChat(
     @Volatile
     var isAuth: Boolean = false
 ) {
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (javaClass != other?.javaClass) return false
-        return id == (other as TelegramChat).id
+    override fun equals(other: Any?): Boolean = when {
+        this === other -> true
+        javaClass != other?.javaClass -> false
+        else -> id == (other as TelegramChat).id
     }
 
     override fun hashCode(): Int = id.hashCode()
