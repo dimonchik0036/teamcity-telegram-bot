@@ -2,11 +2,9 @@ package io.github.dimonchik0036.tcbot
 
 import com.pengrad.telegrambot.model.Chat
 import com.pengrad.telegrambot.model.User
-import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.reflect.KMutableProperty0
 
-class Manager<Key, Value> {
+class TelegramStorage<Key, Value> {
     private val map: ConcurrentHashMap<Key, Value> = ConcurrentHashMap()
     fun getOrPut(key: Key, defaultValue: () -> Value): Value = map.getOrPut(key, defaultValue)
     operator fun get(key: Key): Value = map[key] ?: error("Couldn't find $key")
@@ -20,11 +18,6 @@ class TelegramUser(
     val firstName: String,
     val lastName: String?
 ) {
-    @Volatile
-    var lastCommand: BotCommand? = null
-    @Volatile
-    var context: HashMap<String, Any>? = null
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -50,14 +43,10 @@ class TelegramChat(
     val username: String?,
     val firstName: String?,
     val lastName: String?,
+    val filter: Filter = Filter(),
     @Volatile
-    var isAuth: Boolean = false,
-    @Volatile
-    var branchFilter: Regex? = null,
-    @Volatile
-    var buildFilter: Regex? = null
+    var isAuth: Boolean = false
 ) {
-
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -75,12 +64,6 @@ class TelegramChat(
             lastName = chat.lastName(),
             title = chat.title()
         )
-    }
-
-    fun filterProperty(name: String): Pair<Boolean, KMutableProperty0<Regex?>?> = when (name) {
-        "branch" -> true to this::branchFilter
-        "build_configuration" -> true to this::buildFilter
-        else -> false to null
     }
 }
 

@@ -16,7 +16,7 @@ private val LOG = LoggerFactory.getLogger("team-city-service")
 
 class TeamCityService(
     serverUrl: String,
-    authType: AuthType = Guest,
+    teamCityUser: TeamCityUser = Guest,
     private val cascadeMode: CascadeMode = CascadeMode.ONLY_ROOT,
     private val handlers: Map<String, BuildHandler>,
     private var lastUpdate: Instant = Instant.now(),
@@ -24,7 +24,7 @@ class TeamCityService(
     private val checkProjectDelayMillis: Long = 600_000,
     private val rootProjectsId: Set<ProjectId> = emptySet()
 ) {
-    private val teamCityInstance = authType.teamCityInstance(serverUrl)
+    private val teamCityInstance = teamCityUser.teamCityInstance(serverUrl)
     private val myRunningBuilds: ConcurrentHashMap<Build, BuildContext> = ConcurrentHashMap()
 
     private val rooProjects: List<Project>
@@ -57,7 +57,7 @@ class TeamCityService(
         private set
 
     fun start() = runBlocking<Unit> {
-        LOG.debug("Start")
+        LOG.info("Start")
         launch { startCheckProjectStructure() }
         launch { startCheckUpdates() }
     }
@@ -77,6 +77,7 @@ class TeamCityService(
         LOG.debug("Start check updates")
         checkRunningBuilds()
         checkNewBuilds(this::getNewBuilds)
+        runningBuildCount = myRunningBuilds.count()
         LOG.debug("End check updates")
     }
 
@@ -95,7 +96,7 @@ class TeamCityService(
                     if (id <= oldMaxId) return@inner
                     if (id > lastBuildId) lastBuildId = id
 
-                    LOG.debug("New build $build")
+                    LOG.info("New build $build")
                     if (build.state == BuildState.RUNNING) {
                         myRunningBuilds[build] = BuildContext(project, buildConfiguration)
                     }
@@ -117,11 +118,10 @@ class TeamCityService(
         myRunningBuilds.filter { (build, context) ->
             val newResult = teamCityInstance.build(build.id)
             if (newResult.state == BuildState.RUNNING) return@filter false
-            LOG.debug("Build $newResult is finish")
+            LOG.info("Build $newResult is finish")
             buildHandle(context, newResult)
             true
         }.forEach { build, context -> myRunningBuilds.remove(build, context) }
-        runningBuildCount = myRunningBuilds.count()
         LOG.debug("End check running builds")
     }
 
@@ -194,15 +194,15 @@ class TeamCityService(
     }
 }
 
-sealed class AuthType {
+sealed class TeamCityUser {
     fun teamCityInstance(serverUrl: String): TeamCityInstance = when (this) {
         Guest -> TeamCityInstanceFactory.guestAuth(serverUrl)
-        is WithPassword -> TeamCityInstanceFactory.httpAuth(serverUrl, username, password)
+        is AuthorizedUser -> TeamCityInstanceFactory.httpAuth(serverUrl, username, password)
     }
 }
 
-object Guest : AuthType()
-class WithPassword(val username: String, val password: String) : AuthType()
+object Guest : TeamCityUser()
+class AuthorizedUser(val username: String, val password: String) : TeamCityUser()
 
 enum class CascadeMode {
     RECURSIVELY,

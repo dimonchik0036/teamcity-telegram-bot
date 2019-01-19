@@ -10,20 +10,20 @@ import kotlin.system.exitProcess
 fun main(args: Array<String>): Unit = try {
     val config = Config(inputValues(args))
     val bot = TeamCityTelegramBot(
-        token = config.token,
+        token = config.botToken,
         creatorId = config.creatorId,
         authKey = config.authKey,
         commands = ALL_COMMANDS.associate { it.name to it }
     )
     val teamCityService = TeamCityService(
         serverUrl = config.serverUrl,
-        checkUpdatesDelayMillis = config.updatesDelay ?: 30_000,
-        checkProjectDelayMillis = config.projectsDelay ?: 600_000,
-        rootProjectsId = config.rootProjectId ?: emptySet(),
+        checkUpdatesDelayMillis = config.updatesDelay,
+        checkProjectDelayMillis = config.projectsDelay,
+        rootProjectsId = config.rootProjectId,
         lastUpdate = Instant.now(),
-        authType = config.authType ?: Guest,
+        teamCityUser = config.teamCityUser,
         handlers = bot.buildHandlers(),
-        cascadeMode = config.cascadeMode ?: CascadeMode.ONLY_ROOT
+        cascadeMode = config.cascadeMode
     )
     bot.start(teamCityService)
     teamCityService.start()
