@@ -1,6 +1,7 @@
 package io.github.dimonchik0036.tcbot
 
 import com.pengrad.telegrambot.model.Message
+import com.pengrad.telegrambot.model.request.ParseMode
 import org.slf4j.LoggerFactory
 import java.util.regex.PatternSyntaxException
 
@@ -8,10 +9,17 @@ data class BotCommand(
     val name: String,
     val description: String,
     val usage: String,
+    val auth: Boolean = false,
     private val handler: BotCommand.(TeamCityTelegramBot, TelegramUser, TelegramChat, Message) -> Unit
 ) {
     operator fun invoke(bot: TeamCityTelegramBot, user: TelegramUser, chat: TelegramChat, message: Message) =
-        handler(bot, user, chat, message)
+        if (checkPermissions(user, chat)) handler(bot, user, chat, message)
+        else {
+            LOG.info("Not permitted launch $name to $user in $chat")
+            bot.sendTextMessage("Not permitted", chat, message)
+        }
+
+    private fun checkPermissions(user: TelegramUser, chat: TelegramChat): Boolean = !auth || chat.isAuth
 
     val help = "Command: $name\n" +
             "Usage: $usage\n" +
@@ -22,13 +30,13 @@ val ALL_COMMANDS = listOf(
     BotCommand(
         name = "login",
         usage = "/login [auth_key]",
-        description = "Enable notifications",
+        description = "Sign in",
         handler = BotCommand::login
     ),
     BotCommand(
         name = "logout",
         usage = "/logout",
-        description = "Disable notifications",
+        description = "Sign out",
         handler = BotCommand::logout
     ),
     BotCommand(
@@ -41,25 +49,35 @@ val ALL_COMMANDS = listOf(
         name = "filter",
         usage = "/filter <filter_name> <pattern>. Pattern example: `rr/.*`" + availableFilterName(),
         description = "Add filtering",
-        handler = BotCommand::filter
+        handler = BotCommand::filter,
+        auth = true
     ),
     BotCommand(
         name = "filter_check",
         usage = "/filter_check <filter_name> <text>" + availableFilterName(),
         description = "Check filter",
-        handler = BotCommand::filterCheck
+        handler = BotCommand::filterCheck,
+        auth = true
     ),
     BotCommand(
         name = "count",
         usage = "/count <name>" + availableKeys("name", listOf("running_builds")),
         description = "Get number of",
-        handler = BotCommand::count
+        handler = BotCommand::count,
+        auth = true
     ),
     BotCommand(
         name = "commands",
         usage = "/commands",
         description = "Description like @BotFather",
         handler = BotCommand::commands
+    ),
+    BotCommand(
+        name = "running",
+        usage = "/running [filter]" + availableKeys("filter", listOf("all")),
+        description = "Show running builds",
+        handler = BotCommand::running,
+        auth = true
     )
 ).let {
     it.forEach { command ->
@@ -94,7 +112,7 @@ private fun BotCommand.login(
         LOG.info("Attempting to enable notification with the wrong key `$key` in `$chat`")
         "Bad auth key"
     }
-    bot.sendTextMessageWithReply(text, chat, message)
+    bot.sendTextMessage(text, chat, message)
 }
 
 private fun BotCommand.logout(
@@ -105,7 +123,7 @@ private fun BotCommand.logout(
 ) {
     chat.isAuth = false
     LOG.info("Disable notification in $chat")
-    bot.sendTextMessageWithReply("Notifications disabled", chat, message)
+    bot.sendTextMessage("Notifications disabled", chat, message)
 }
 
 private fun BotCommand.help(
@@ -120,7 +138,7 @@ private fun BotCommand.help(
             separator = "\n----------\n",
             transform = BotCommand::help
         ) else commands[args]?.help ?: "Couldn't find `$args` command"
-        sendTextMessageWithReply(text, chat, message)
+        sendTextMessage(text, chat, message)
     }
 }
 
@@ -135,7 +153,7 @@ private fun BotCommand.filter(
     val filterName = args.substringBefore(' ')
     val text = if (!Filter.isFilterName(filterName)) help
     else createFilter(args.substringAfter(' ')) { filter.setFilterByName(filterName, it) }
-    bot.sendTextMessageWithReply(text, chat, message)
+    bot.sendTextMessage(text, chat, message)
 }
 
 private fun createFilter(pattern: String, onSuccess: (Regex) -> Unit): String = if (pattern.isEmpty()) "Empty pattern"
@@ -155,16 +173,14 @@ private fun BotCommand.filterCheck(
 ) {
     val args = message.commandArguments
     val filter = chat.filter
-    val (ok, regex) = filter.getFilterByName(args.substringBefore(' '))
-    val text = if (!ok) help else checkFilter(args.substringAfter(' '), regex)
-    bot.sendTextMessageWithReply(text, chat, message)
+    val regex = filter.getFilterByName(args.substringBefore(' '))
+    val text = if (regex == null) help
+    else checkFilter(args.substringAfter(' '), regex)
+    bot.sendTextMessage(text, chat, message)
 }
 
-private fun checkFilter(text: String, regex: Regex?): String = when {
-    text.isEmpty() -> "Missing text"
-    regex == null -> "No filter specified"
-    else -> "Result: ${regex.matches(text)}"
-}
+private fun checkFilter(text: String, regex: Regex): String = if (text.isEmpty()) "Missing text"
+else "Result: ${regex.matches(text)}"
 
 private fun BotCommand.count(
     bot: TeamCityTelegramBot,
@@ -173,10 +189,10 @@ private fun BotCommand.count(
     message: Message
 ) {
     val text = when (message.commandArguments) {
-        "running_builds" -> bot.service.runningBuildCount.toString()
+        "running_builds" -> bot.service.runningBuilds.size.toString()
         else -> help
     }
-    bot.sendTextMessageWithReply(text, chat, message)
+    bot.sendTextMessage(text, chat, message)
 }
 
 private fun BotCommand.commands(
@@ -186,5 +202,30 @@ private fun BotCommand.commands(
     message: Message
 ) {
     val text = ALL_COMMANDS.joinToString(separator = "\n") { "${it.name} - ${it.description}" }
-    bot.sendTextMessageWithReply(text, chat, message)
+    bot.sendTextMessage(text, chat, message)
+}
+
+private fun BotCommand.running(
+    bot: TeamCityTelegramBot,
+    user: TelegramUser,
+    chat: TelegramChat,
+    message: Message
+) {
+    val filter = chat.filter
+    val builds = when (message.commandArguments) {
+        "all" -> bot.service.runningBuilds.asSequence()
+        "" -> bot.service.runningBuilds.asSequence().filter(filter::matches)
+        else -> null
+    }
+    with(bot) {
+        when {
+            builds == null -> sendTextMessage(help, chat, message)
+            builds.none() -> sendTextMessage("Builds not fount", chat, message)
+            // Telegram can't mark up a completely large message.
+            else -> builds.chunked(10).forEach {
+                val text = it.joinToString(separator = "\n\n", transform = TeamCityBuild::markdownDescription)
+                sendTextMessage(text, chat, message, ParseMode.Markdown)
+            }
+        }
+    }
 }

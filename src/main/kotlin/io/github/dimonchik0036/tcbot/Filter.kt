@@ -2,16 +2,19 @@ package io.github.dimonchik0036.tcbot
 
 class Filter(
     @Volatile
-    var branchFilter: Regex? = null,
+    var branchFilter: Regex = ALL,
     @Volatile
-    var buildFilter: Regex? = null
+    var buildFilter: Regex = ALL
 ) {
-    fun matchesBranchName(name: String): Boolean = branchFilter?.matches(name) ?: true
-    fun matchesBuildConfigurationId(configuration: String) = buildFilter?.matches(configuration) ?: true
-    fun getFilterByName(name: String): Pair<Boolean, Regex?> = when (name) {
-        "branch" -> true to branchFilter
-        "build_configuration" -> true to buildFilter
-        else -> false to null
+    private fun matchesBranchName(name: String?): Boolean = name?.let { branchFilter.matches(name) } ?: true
+    private fun matchesBuildConfigurationId(configuration: String) = buildFilter.matches(configuration)
+    fun matches(build: TeamCityBuild) =
+        matchesBranchName(build.branchName) && matchesBuildConfigurationId(build.buildConfigurationId)
+
+    fun getFilterByName(name: String): Regex? = when (name) {
+        "branch" -> branchFilter
+        "build_configuration" -> buildFilter
+        else -> null
     }
 
     fun setFilterByName(name: String, filter: Regex): Boolean {
@@ -24,6 +27,7 @@ class Filter(
     }
 
     companion object {
+        private val ALL = Regex(".*")
         val FILTER_NAMES = listOf("branch", "build_configuration")
         fun isFilterName(name: String): Boolean = name in FILTER_NAMES
     }

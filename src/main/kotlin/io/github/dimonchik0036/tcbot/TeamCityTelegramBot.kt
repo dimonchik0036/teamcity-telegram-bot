@@ -22,8 +22,10 @@ class TeamCityTelegramBot(
     private val creatorId: Long,
     private val authKey: String? = null
 ) {
+    /**
+     * Public API
+     */
     lateinit var service: TeamCityService
-    private val sender = TelegramBot(token)
     val userStorage = TelegramStorage<Int, TelegramUser>()
     val chatStorage = TelegramStorage<Long, TelegramChat>()
 
@@ -47,19 +49,12 @@ class TeamCityTelegramBot(
         }
     }
 
-    fun buildHandlers(): Map<String, BuildHandler> = mapOf(
+    fun buildHandlers(): Map<String, TeamCityBuildHandler> = mapOf(
         "build info" to { build ->
-            val description = createBuildDescriptionMarkdown(this, build)
-            val branchName = build.branch.name
             GlobalScope.launch {
                 chatStorage.forEach { _, chat ->
-                    if (!chat.isAuth) return@forEach
-
-                    val filter = chat.filter
-                    if (branchName == null || !filter.matchesBranchName(branchName)) return@forEach
-                    if (!filter.matchesBuildConfigurationId(build.buildConfigurationId.stringId)) return@forEach
-
-                    sender.execute(SendMessage(chat.id, description).parseMode(ParseMode.Markdown))
+                    if (!chat.isAuth || !chat.filter.matches(build)) return@forEach
+                    sendTextMessage(build.markdownDescription, chat, parseMode = ParseMode.Markdown)
                 }
             }
         }
@@ -68,13 +63,19 @@ class TeamCityTelegramBot(
     fun checkAuthKey(key: String?): Boolean = if (authKey.isNullOrBlank()) true
     else authKey == key
 
-    fun sendTextMessage(text: String, chat: TelegramChat) = sender
-        .execute(SendMessage(chat.id, text))
-        .checkError(chat)
+    fun sendTextMessage(
+        text: String,
+        chat: TelegramChat,
+        messageForReply: Message? = null,
+        parseMode: ParseMode? = null
+    ) {
+        var message = SendMessage(chat.id, text)
+        if (messageForReply != null) message = message.replyToMessageId(messageForReply.messageId())
+        if (parseMode != null) message = message.parseMode(parseMode)
+        sender.execute(message).checkError(chat)
+    }
 
-    fun sendTextMessageWithReply(text: String, chat: TelegramChat, message: Message) = sender
-        .execute(SendMessage(chat.id, text).replyToMessageId(message.messageId()))
-        .checkError(chat)
+    private val sender = TelegramBot(token)
 
     private fun onUpdate(update: Update) {
         LOG.info("New update $update")
@@ -105,7 +106,7 @@ class TeamCityTelegramBot(
         if (command.isEmpty()) return
         val handler = commands[command]
         if (handler != null) {
-            LOG.info("Run $command")
+            LOG.info("Run $command from $user in $chat")
             handler(this, user, chat, message)
         } else {
             LOG.info("Unknown command $command")

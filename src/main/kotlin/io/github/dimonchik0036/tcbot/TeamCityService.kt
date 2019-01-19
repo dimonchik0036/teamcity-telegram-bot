@@ -10,7 +10,6 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.*
-import java.util.concurrent.ConcurrentHashMap
 
 private val LOG = LoggerFactory.getLogger("team-city-service")
 
@@ -18,14 +17,28 @@ class TeamCityService(
     serverUrl: String,
     teamCityUser: TeamCityUser = Guest,
     private val cascadeMode: CascadeMode = CascadeMode.ONLY_ROOT,
-    private val handlers: Map<String, BuildHandler>,
+    private val handlers: Map<String, TeamCityBuildHandler>,
     private var lastUpdate: Instant = Instant.now(),
     private val checkUpdatesDelayMillis: Long = 60_000,
     private val checkProjectDelayMillis: Long = 600_000,
     private val rootProjectsId: Set<ProjectId> = emptySet()
 ) {
+    /**
+     * Public API
+     */
+    @Volatile
+    var runningBuilds: Set<TeamCityBuild> = emptySet()
+        private set
+
+    fun start() = runBlocking<Unit> {
+        LOG.info("Start")
+        launch { startCheckProjectStructure() }
+        launch { startCheckUpdates() }
+    }
+    //---------------------------------------------
+
     private val teamCityInstance = teamCityUser.teamCityInstance(serverUrl)
-    private val myRunningBuilds: ConcurrentHashMap<Build, BuildContext> = ConcurrentHashMap()
+    private val myRunningBuilds: MutableSet<TeamCityBuild> = hashSetOf()
 
     private val rooProjects: List<Project>
         get() = if (rootProjectsId.isEmpty()) listOf(teamCityInstance.rootProject())
@@ -41,26 +54,7 @@ class TeamCityService(
         }
     }
 
-    fun runningBuilds(filter: (Map.Entry<Build, BuildContext>) -> Boolean): Map<Build, BuildContext> =
-        myRunningBuilds.filter(filter)
-
-    @Volatile
-    var runningBuildCount: Int = 0
-        private set
-
-    @Volatile
-    var projectStructure: Map<Project, List<BuildConfiguration>> = emptyMap()
-        private set
-
-    @Volatile
-    var vcsRoots: Set<VcsRoot> = emptySet()
-        private set
-
-    fun start() = runBlocking<Unit> {
-        LOG.info("Start")
-        launch { startCheckProjectStructure() }
-        launch { startCheckUpdates() }
-    }
+    private var projectStructure: Map<Project, List<BuildConfiguration>> = emptyMap()
 
     private suspend fun startCheckUpdates() {
         while (true) {
@@ -77,7 +71,9 @@ class TeamCityService(
         LOG.debug("Start check updates")
         checkRunningBuilds()
         checkNewBuilds(this::getNewBuilds)
-        runningBuildCount = myRunningBuilds.count()
+        if (runningBuilds != myRunningBuilds) {
+            runningBuilds = myRunningBuilds.toSet()
+        }
         LOG.debug("End check updates")
     }
 
@@ -96,15 +92,15 @@ class TeamCityService(
                     if (id <= oldMaxId) return@inner
                     if (id > lastBuildId) lastBuildId = id
 
+                    val teamCityBuild = TeamCityBuild.fromBuild(build)
                     LOG.info("New build $build")
                     if (build.state == BuildState.RUNNING) {
-                        myRunningBuilds[build] = BuildContext(project, buildConfiguration)
+                        myRunningBuilds += teamCityBuild
                     }
 
                     val startTime = build.startDateTime
                     if (startTime != null && startTime > lastTime) lastTime = startTime
-
-                    buildHandle(BuildContext(project, buildConfiguration), build)
+                    buildHandle(teamCityBuild)
                 }
             }
         }
@@ -115,19 +111,20 @@ class TeamCityService(
 
     private fun checkRunningBuilds() {
         LOG.debug("Start check running builds")
-        myRunningBuilds.filter { (build, context) ->
-            val newResult = teamCityInstance.build(build.id)
-            if (newResult.state == BuildState.RUNNING) return@filter false
-            LOG.info("Build $newResult is finish")
-            buildHandle(context, newResult)
+        myRunningBuilds.removeIf {
+            val build = teamCityInstance.build(BuildId(it.id))
+            if (build.state == BuildState.RUNNING) return@removeIf false
+            LOG.info("Build $build is finish")
+            buildHandle(TeamCityBuild.fromBuild(build))
             true
-        }.forEach { build, context -> myRunningBuilds.remove(build, context) }
+        }
         LOG.debug("End check running builds")
     }
 
-    private fun buildHandle(buildContext: BuildContext, build: Build) {
+    private fun buildHandle(build: TeamCityBuild) {
         handlers.forEach {
-            it.value(buildContext, build)
+            LOG.debug("Handle `${it.key}` on $build")
+            it.value(build)
         }
     }
 
@@ -188,23 +185,7 @@ class TeamCityService(
         val map = hashMapOf<Project, List<BuildConfiguration>>()
         fillProjectStructure(rooProjects, map)
         projectStructure = map
-        vcsRoots = teamCityInstance.vcsRoots().all().toSet()
 
         LOG.debug("End check project structure")
     }
-}
-
-sealed class TeamCityUser {
-    fun teamCityInstance(serverUrl: String): TeamCityInstance = when (this) {
-        Guest -> TeamCityInstanceFactory.guestAuth(serverUrl)
-        is AuthorizedUser -> TeamCityInstanceFactory.httpAuth(serverUrl, username, password)
-    }
-}
-
-object Guest : TeamCityUser()
-class AuthorizedUser(val username: String, val password: String) : TeamCityUser()
-
-enum class CascadeMode {
-    RECURSIVELY,
-    ONLY_ROOT
 }

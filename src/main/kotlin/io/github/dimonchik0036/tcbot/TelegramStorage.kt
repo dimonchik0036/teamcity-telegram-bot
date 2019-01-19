@@ -8,6 +8,7 @@ class TelegramStorage<Key, Value> {
     private val map: ConcurrentHashMap<Key, Value> = ConcurrentHashMap()
     fun getOrPut(key: Key, defaultValue: () -> Value): Value = map.getOrPut(key, defaultValue)
     operator fun get(key: Key): Value = map[key] ?: error("Couldn't find $key")
+    val entries: Sequence<Map.Entry<Key, Value>> get() = map.asSequence()
 
     fun forEach(action: (Key, Value) -> Unit) = map.forEach(action)
 }

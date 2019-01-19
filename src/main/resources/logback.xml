@@ -7,39 +7,7 @@
         </encoder>
     </appender>
 
-    <appender name="rest" class="ch.qos.logback.core.FileAppender">
-        <file>rest.log</file>
-        <immediateFlush>false</immediateFlush>
-        <encoder>
-            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
-
-    <appender name="bot" class="ch.qos.logback.core.FileAppender">
-        <file>bot.log</file>
-        <immediateFlush>false</immediateFlush>
-        <encoder>
-            <pattern>%d{YYYY-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-        </encoder>
-    </appender>
-
-    <logger name="teamcity-rest-client.rest" additivity="false">
-        <appender-ref ref="rest"/>
-    </logger>
-
-    <logger name="teamcity-rest-client" additivity="false">
-        <appender-ref ref="rest"/>
-    </logger>
-
-    <logger name="telegram-bot" additivity="false">
-        <appender-ref ref="bot"/>
-    </logger>
-
-    <logger name="bot-command" additivity="false">
-        <appender-ref ref="bot"/>
-    </logger>
-
-    <root level="DEBUG">
+    <root level="INFO">
         <appender-ref ref="default"/>
     </root>
 </configuration>
