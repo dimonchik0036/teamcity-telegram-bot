@@ -56,8 +56,7 @@ class TeamCityTest {
 
         bot.start(service)
         doTest {
-            val expected = Request(creatorId, "Run")
-            assertEquals(expected, receiver.receive())
+            assertEquals("Run", receiveText())
         }
     }
 
@@ -80,17 +79,13 @@ class TeamCityTest {
 
     @Test
     fun `test bad auth`() = doTest {
-        sender.send(createUpdate(command = "login"))
-        assertEquals(failedAuth, receiver.receive())
-        sender.send(createUpdate(command = "login", textOrArguments = "12"))
-        assertEquals(failedAuth, receiver.receive())
+        invokeCommand("login", BotCommand.FAILED_AUTH, "", "12")
         assertFalse(bot.chatStorage.getValue(creatorId).isAuth)
     }
 
     @Test
     fun `test not permitted`() = doTest {
-        sender.send(createUpdate(command = "filter"))
-        assertEquals(notPermitted, receiver.receive())
+        invokeCommand("filter", BotCommand.NOT_PERMITTED)
     }
 
     @Test
@@ -101,32 +96,25 @@ class TeamCityTest {
 
     @Test
     fun `test invalid filter`() = doTest(withAuth = true) {
-        val command = "filter"
-        val help = ALL_COMMANDS.first { it.name == command }.help
-        sender.send(createUpdate(command = command))
-        assertEquals(help, receiveText())
-        sender.send(createUpdate(command = command, textOrArguments = "branch"))
-        assertEquals(help, receiveText())
-        sender.send(createUpdate(command = command, textOrArguments = "???"))
-        assertEquals(help, receiveText())
+        checkInvalidCommandWithHelp("filter", "", "branch", "???")
     }
 
     @Test
     fun `test invalid filter check`() = doTest(withAuth = true) {
-        val command = "filter_check"
-        val help = ALL_COMMANDS.first { it.name == command }.help
-        sender.send(createUpdate(command = command))
-        assertEquals(help, receiveText())
-        sender.send(createUpdate(command = command, textOrArguments = "branch"))
-        assertEquals(help, receiveText())
-        sender.send(createUpdate(command = command, textOrArguments = "???"))
-        assertEquals(help, receiveText())
+        checkInvalidCommandWithHelp("filter_check", "", "branch", "???")
     }
 
     @Test
     fun `test filter check`() = Filter.FILTER_NAMES.forEach {
         testFilterCheck(it, "pa..ern", "pattern", true)
         testFilterCheck(it, "master", "rr/dd", false)
+    }
+
+    @Test
+    fun `test count`() = doTest(withAuth = true) {
+        val command = "count"
+        checkInvalidCommandWithHelp(command, "", "???")
+        invokeCommand(command, myRunningBuilds.size.toString(), "running_builds")
     }
 
     @Test
@@ -154,14 +142,16 @@ class TeamCityTest {
         assertEquals(expected, running)
     }
 
+    private suspend fun checkInvalidCommandWithHelp(command: String, vararg args: String) {
+        val help = ALL_COMMANDS.first { it.name == command }.help
+        invokeCommand(command = command, args = *args, expected = help)
+    }
+
     private fun testFilterCheck(filterName: String, pattern: String, text: String, expected: Boolean) =
         doTest(withAuth = true) {
             assertEquals(expected, Regex(pattern).matches(text))
-            addFilters(filterName, pattern)
-            sender.send(createUpdate(command = "filter_check", textOrArguments = "$filterName $text"))
-
-            val actual = receiveText()
-            assertEquals(expected.toString(), actual)
+            addFilters("$filterName $pattern")
+            invokeCommand("filter_check", expected.toString(), "$filterName $text")
         }
 
     private fun testFilter(filterName: String, pattern: String) = doTest(withAuth = true) {
@@ -169,7 +159,7 @@ class TeamCityTest {
         expectedFilter.setFilterByName(filterName, Regex(pattern))
         val expected = myRandomBuilds.filter(expectedFilter::matches).toSet()
 
-        addFilters(filterName, pattern)
+        addFilters("$filterName $pattern")
         val actualFilter = getFilter()
         val actual = myRandomBuilds.filter(actualFilter::matches).toSet()
 
@@ -185,12 +175,7 @@ class TeamCityTest {
         )
     }
 
-    private suspend fun addFilters(filterName: String, pattern: String) = addFilters("$filterName $pattern")
-    private suspend fun addFilters(filter: String) = addFilters(listOf(filter))
-    private suspend fun addFilters(filters: List<String>) = filters.forEach {
-        sender.send(createUpdate(command = "filter", textOrArguments = it))
-        assertEquals(receiveText(), BotCommand.SUCCESS)
-    }
+    private suspend fun addFilters(vararg filters: String) = invokeCommand("filter", BotCommand.SUCCESS, *filters)
 
     private suspend fun getRunningBuilds(filter: String): Set<String> {
         sender.send(createUpdate(command = "running", textOrArguments = filter))
@@ -228,6 +213,17 @@ class TeamCityTest {
         assertEquals(expected, requests)
     }
 
+    private suspend fun invokeCommand(command: String, expected: String, vararg args: String) {
+        assertTrue(expected.isNotBlank())
+        if (args.isEmpty()) {
+            sender.send(createUpdate(command = command))
+            assertEquals(expected, receiveText())
+        } else args.forEach {
+            sender.send(createUpdate(command = command, textOrArguments = it))
+            assertEquals(expected, receiveText())
+        }
+    }
+
     private fun doTest(
         timeout: Long = 3_000,
         withAuth: Boolean = false,
@@ -241,19 +237,13 @@ class TeamCityTest {
         }
     }
 
-    private val successAuth = Request(creatorId, BotCommand.SUCCESS_AUTH)
-    private val failedAuth = Request(creatorId, BotCommand.FAILED_AUTH)
-    private val notPermitted = Request(creatorId, BotCommand.NOT_PERMITTED)
-    private val logoutRequest = Request(creatorId, BotCommand.LOGOUT_MESSAGE)
     private suspend fun login() {
-        sender.send(createUpdate(command = "login", textOrArguments = "${config.authKey}"))
-        assertEquals(successAuth, receiver.receive())
+        invokeCommand("login", BotCommand.SUCCESS_AUTH, "${config.authKey}")
         assertTrue(bot.chatStorage.getValue(creatorId).isAuth)
     }
 
     private suspend fun logout() {
-        sender.send(createUpdate(command = "logout"))
-        assertEquals(logoutRequest, receiver.receive())
+        invokeCommand("logout", BotCommand.LOGOUT_MESSAGE)
         assertFalse(bot.chatStorage.getValue(creatorId).isAuth)
     }
 
@@ -294,8 +284,9 @@ class TeamCityTest {
         userId: Int = creatorId.toInt(),
         username: String = creatorUsername
     ): String {
+        val commandWithArgs = if (textOrArguments.isEmpty()) command else "$command $textOrArguments"
         val resultText = if (command != null) {
-            """"/$command $textOrArguments", "entities": [ {
+            """"/$commandWithArgs", "entities": [ {
             "type":"bot_command",
             "offset": 0,
             "length":${command.length + 1}
@@ -303,21 +294,21 @@ class TeamCityTest {
             """
         } else textOrArguments
         return """
-    {
-       "message": {
-            "message_id":1,
-            "chat": {
-                "id": $chatId,
-                "username":"$username"
-            },
-            "from":{
-                "id": $userId,
-                "username":"$username",
-                "first_name":"Dmitry"
-            },
-            "text": $resultText
-       }
-   }
+            {
+               "message": {
+                    "message_id":1,
+                    "chat": {
+                        "id": $chatId,
+                        "username":"$username"
+                    },
+                    "from":{
+                        "id": $userId,
+                        "username":"$username",
+                        "first_name":"Dmitry"
+                    },
+                    "text": $resultText
+               }
+           }
 """
     }
 }
