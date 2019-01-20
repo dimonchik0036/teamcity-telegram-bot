@@ -7,7 +7,7 @@
 
 ## Run
 1. Create config [file](src/main/resources/tcbot.properties)
-2. Run bot `java -jar teamcity-telegram-bot-0.1.jar <path/to/config>`
+2. Run bot `java -jar teamcity-telegram-bot-fatJar-0.1.jar <path/to/config>`
 3. Add a bot to the channel or start a private conversation with it.
 4. Enter `/login`  
     4.1 You can add filtering. See the next paragraph. 
