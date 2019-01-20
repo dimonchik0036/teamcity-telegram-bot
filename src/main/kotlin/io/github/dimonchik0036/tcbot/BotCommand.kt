@@ -183,16 +183,14 @@ private fun BotCommand.filterCheck(
     chat: TelegramChat,
     message: Message
 ) {
-    val args = message.commandArguments
+    val args = message.commandArgumentsList
     val filter = chat.filter
-    val regex = filter.getFilterByName(args.substringBefore(' '))
-    val text = if (regex == null) help
-    else checkFilter(args.substringAfter(' '), regex)
+    val regex = filter.getFilterByName(args.firstOrNull() ?: "")
+    val textForCheck = args.getOrNull(1)
+    val text = if (regex == null || textForCheck == null) help
+    else "${regex.matches(textForCheck)}"
     bot.sendTextMessage(text, chat, message)
 }
-
-private fun checkFilter(text: String, regex: Regex): String = if (text.isEmpty()) "Missing text"
-else "Result: ${regex.matches(text)}"
 
 private fun BotCommand.count(
     bot: TeamCityTelegramBot,

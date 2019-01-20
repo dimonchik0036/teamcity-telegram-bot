@@ -29,6 +29,7 @@ class TeamCityTest {
     )
     private val sender = Channel<String>(10)
     private val receiver = Channel<Request>(10)
+    private suspend fun receiveText(): String = receiver.receive().text
 
     private val bot = TeamCityTelegramBot(
         sender = MockTelegramBot(config.botToken, receiver, sender),
@@ -95,6 +96,25 @@ class TeamCityTest {
     @Test
     fun `test filter`() {
         testFilter("branch", "rr/.*")
+        testFilter("build_configuration", "Kotlin_dev_AggregateBranch")
+    }
+
+    @Test
+    fun `test invalid filter check`() = doTest(withAuth = true) {
+        val command = "filter_check"
+        val help = ALL_COMMANDS.first { it.name == command }.help
+        sender.send(createUpdate(command = command))
+        assertEquals(help, receiveText())
+        sender.send(createUpdate(command = command, textOrArguments = "branch"))
+        assertEquals(help, receiveText())
+        sender.send(createUpdate(command = command, textOrArguments = "???"))
+        assertEquals(help, receiveText())
+    }
+
+    @Test
+    fun `test filter check`() = Filter.FILTER_NAMES.forEach {
+        testFilterCheck(it, "pa..ern", "pattern", true)
+        testFilterCheck(it, "master", "rr/dd", false)
     }
 
     @Test
@@ -110,7 +130,7 @@ class TeamCityTest {
 
     @Test
     fun `test running`() = doTest(withAuth = true) {
-        addFilter("branch", "rr/.*")
+        addFilters("branch rr/.*")
 
         var running = getRunningBuilds("all")
         var expected = myRunningBuilds.map(TeamCityBuild::markdownDescription).toSet()
@@ -122,12 +142,22 @@ class TeamCityTest {
         assertEquals(expected, running)
     }
 
+    private fun testFilterCheck(filterName: String, pattern: String, text: String, expected: Boolean) =
+        doTest(withAuth = true) {
+            assertEquals(expected, Regex(pattern).matches(text))
+            addFilters(filterName, pattern)
+            sender.send(createUpdate(command = "filter_check", textOrArguments = "$filterName $text"))
+
+            val actual = receiveText()
+            assertEquals(expected.toString(), actual)
+        }
+
     private fun testFilter(filterName: String, pattern: String) = doTest(withAuth = true) {
         val expectedFilter = Filter()
         expectedFilter.setFilterByName(filterName, Regex(pattern))
         val expected = myRandomBuilds.filter(expectedFilter::matches).toSet()
 
-        addFilter(filterName, pattern)
+        addFilters(filterName, pattern)
         val actualFilter = getFilter()
         val actual = myRandomBuilds.filter(actualFilter::matches).toSet()
 
@@ -139,18 +169,20 @@ class TeamCityTest {
             baseTransformer = TeamCityBuild::markdownDescription,
             requestTransformer = Request::text,
             baseFilter = actualFilter::matches,
-            expectedCount = 3
+            expectedCount = expected.size
         )
     }
 
-    private suspend fun addFilter(filterName: String, pattern: String) {
-        sender.send(createUpdate(command = "filter", textOrArguments = "$filterName $pattern"))
-        assertEquals(receiver.receive().text, BotCommand.SUCCESS)
+    private suspend fun addFilters(filterName: String, pattern: String) = addFilters("$filterName $pattern")
+    private suspend fun addFilters(filter: String) = addFilters(listOf(filter))
+    private suspend fun addFilters(filters: List<String>) = filters.forEach {
+        sender.send(createUpdate(command = "filter", textOrArguments = it))
+        assertEquals(receiveText(), BotCommand.SUCCESS)
     }
 
     private suspend fun getRunningBuilds(filter: String): Set<String> {
         sender.send(createUpdate(command = "running", textOrArguments = filter))
-        return receiver.receive().text.split("\n\n").toSet()
+        return receiveText().split("\n\n").toSet()
     }
 
     private fun getFilter(): Filter = bot.chatStorage.getValue(creatorId).filter

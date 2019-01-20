@@ -109,7 +109,7 @@ class TeamCityTelegramBot(
         if (command.isEmpty()) return
         val handler = commands[command]
         if (handler != null) {
-            LOG.info("Run $command from $user in $chat")
+            LOG.info("Run ${message.text()} from $user in $chat")
             handler(this, user, chat, message)
         } else {
             LOG.info("Unknown command $command")
