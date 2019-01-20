@@ -37,10 +37,20 @@ class TeamCityTest {
         commands = ALL_COMMANDS.associate { it.name to it }
     )
 
+    private val myRandomBuilds: Set<TeamCityBuild> = setOf(
+        createBuild(),
+        createBuild(branchName = "not-rr-branch"),
+        createBuild(branchName = "master", buildConfigurationId = "Kotlin"),
+        createBuild(branchName = null),
+        createBuild(state = BuildState.DELETED, status = null, containChanges = false)
+    )
+
+    private val myRunningBuilds: Set<TeamCityBuild> = myRandomBuilds.filter { it.state == BuildState.RUNNING }.toSet()
+
     @BeforeTest
     fun start() = runBlocking {
         val service: TeamCityService = mockk {
-            every { runningBuilds } returns emptySet()
+            every { runningBuilds } returns myRunningBuilds
         }
 
         bot.start(service)
@@ -82,28 +92,78 @@ class TeamCityTest {
     }
 
     @Test
+    fun `test filter`() = doTest {
+        login()
+        val filter = resetFilter()
+        filter.setFilterByName("branch", Regex("rr/.*"))
+        checkMessage(
+            baseSet = myRandomBuilds,
+            sendAction = bot::buildInfoHandler,
+            baseTransformer = TeamCityBuild::markdownDescription,
+            requestTransformer = Request::text,
+            baseFilter = filter::matches,
+            expectedCount = 3
+        )
+        resetFilter()
+    }
+
+    @Test
     fun `test simple`() = doTest(timeout = 10_000) {
         login()
         val builds = generateBuilds(10)
         checkMessage(
             baseSet = builds,
+            sendAction = bot::buildInfoHandler,
             baseTransformer = TeamCityBuild::markdownDescription,
-            requestTransformer = Request::text,
-            sendAction = bot::buildInfoHandler
+            requestTransformer = Request::text
         )
+    }
+
+    @Test
+    fun `test running`() = doTest {
+        login()
+        val filter = resetFilter()
+        filter.setFilterByName("branch", Regex("rr/.*"))
+
+        var running = getRunningBuilds("all")
+        var expected = myRunningBuilds.map(TeamCityBuild::markdownDescription).toSet()
+        assertEquals(expected, running)
+
+        running = getRunningBuilds("")
+        expected = myRunningBuilds.filter(filter::matches).map(TeamCityBuild::markdownDescription).toSet()
+        assertEquals(expected, running)
+
+        resetFilter()
+    }
+
+    private suspend fun getRunningBuilds(filter: String): Set<String> {
+        sender.send(createUpdate(filter, creatorId, creatorId.toInt(), creatorUsername, "running"))
+        return receiver.receive().text.split("\n\n").toSet()
+    }
+
+    private fun resetFilter(): Filter {
+        val chat = bot.chatStorage.getValue(creatorId)
+        val filter = chat.filter
+        for (name in Filter.FILTER_NAMES) {
+            assertTrue(filter.setFilterByName(name, Filter.DEFAULT_FILTER))
+        }
+        return filter
     }
 
     private suspend fun <T, R> checkMessage(
         baseSet: Set<T>,
+        sendAction: (T) -> Unit,
         baseTransformer: (T) -> R,
         requestTransformer: (Request) -> R,
-        sendAction: (T) -> Unit
+        baseFilter: (T) -> Boolean = { true },
+        expectedCount: Int? = null
     ) {
         GlobalScope.launch {
             baseSet.forEach(sendAction)
         }
 
-        val expected = baseSet.map(baseTransformer).toSet()
+        val expected = baseSet.filter(baseFilter).map(baseTransformer).toSet()
+        if (expectedCount != null) assertEquals(expectedCount, expected.size)
         val requests = hashSetOf<R>()
         repeat(expected.size) {
             requests += requestTransformer(receiver.receive())
@@ -154,8 +214,8 @@ class TeamCityTest {
     var buildId = 42
     private fun createBuild(
         state: BuildState = BuildState.RUNNING,
-        status: BuildStatus = BuildStatus.SUCCESS,
-        branchName: String = "rr/dimonchik0036/test-teamcity-bot",
+        status: BuildStatus? = BuildStatus.SUCCESS,
+        branchName: String? = "rr/dimonchik0036/test-teamcity-bot",
         buildConfigurationId: String = "Kotlin_dev_AggregateBranch",
         containChanges: Boolean = true
     ): TeamCityBuild {
