@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory
 private val LOG = LoggerFactory.getLogger("telegram-bot")
 
 class TeamCityTelegramBot(
-    token: String,
+    private val sender: TelegramBot,
     val commands: Map<String, BotCommand>,
     private val creatorId: Long,
     private val authKey: String? = null
@@ -49,16 +49,20 @@ class TeamCityTelegramBot(
         }
     }
 
+    fun stop() = sender.removeGetUpdatesListener()
+
     fun buildHandlers(): Map<String, TeamCityBuildHandler> = mapOf(
-        "build info" to { build ->
-            GlobalScope.launch {
-                chatStorage.forEach { _, chat ->
-                    if (!chat.isAuth || !chat.filter.matches(build)) return@forEach
-                    sendTextMessage(build.markdownDescription, chat, parseMode = ParseMode.Markdown)
-                }
+        "build info" to this::buildInfoHandler
+    )
+
+    fun buildInfoHandler(build: TeamCityBuild) {
+        GlobalScope.launch {
+            chatStorage.forEach { _, chat ->
+                if (!chat.isAuth || !chat.filter.matches(build)) return@forEach
+                sendTextMessage(build.markdownDescription, chat, parseMode = ParseMode.Markdown)
             }
         }
-    )
+    }
 
     fun checkAuthKey(key: String?): Boolean = if (authKey.isNullOrBlank()) true
     else authKey == key
@@ -74,8 +78,7 @@ class TeamCityTelegramBot(
         if (parseMode != null) message = message.parseMode(parseMode)
         sender.execute(message).checkError(chat)
     }
-
-    private val sender = TelegramBot(token)
+    //---------------------------------------------
 
     private fun onUpdate(update: Update) {
         LOG.info("New update $update")

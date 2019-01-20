@@ -1,9 +1,6 @@
 package io.github.dimonchik0036.tcbot
 
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.*
 import org.jetbrains.teamcity.rest.*
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -30,12 +27,19 @@ class TeamCityService(
     var runningBuilds: Set<TeamCityBuild> = emptySet()
         private set
 
-    fun start() = runBlocking<Unit> {
+    fun start() = runBlocking {
         LOG.info("Start")
-        launch { startCheckProjectStructure() }
-        launch { startCheckUpdates() }
+        job = launch {
+            launch { startCheckProjectStructure() }
+            launch { startCheckUpdates() }
+        }
     }
+
+    fun stop() = job.cancel()
+
     //---------------------------------------------
+    @Volatile
+    private lateinit var job: Job
 
     private val teamCityInstance = teamCityUser.teamCityInstance(serverUrl)
     private val myRunningBuilds: HashSet<TeamCityBuild> = hashSetOf()
@@ -135,18 +139,17 @@ class TeamCityService(
         }
     }
 
-    private fun getRunningBuilds() {
+    private fun initRunningBuilds() {
         LOG.debug("Init running builds")
-        checkNewBuilds {
-            teamCityInstance.builds()
-                .fromConfiguration(it)
-                .onlyRunning()
-                .all()
-        }
+        checkNewBuilds(this::getRunningBuilds)
     }
 
-    private fun getNewBuilds(configurationId: BuildConfigurationId): Sequence<Build> =
-        teamCityInstance.builds()
+    private fun getRunningBuilds(configurationId: BuildConfigurationId): Sequence<Build> = teamCityInstance.builds()
+        .fromConfiguration(configurationId)
+        .onlyRunning()
+        .all()
+
+    private fun getNewBuilds(configurationId: BuildConfigurationId): Sequence<Build> = teamCityInstance.builds()
             .fromConfiguration(configurationId)
             .includeCanceled()
             .includeFailed()
@@ -158,7 +161,7 @@ class TeamCityService(
     private suspend fun startCheckProjectStructure() {
         try {
             checkProjectStructure()
-            getRunningBuilds()
+            initRunningBuilds()
             while (true) {
                 checkProjectStructure()
                 delay(checkProjectDelayMillis)

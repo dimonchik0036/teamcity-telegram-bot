@@ -7,7 +7,13 @@ import java.util.concurrent.ConcurrentHashMap
 class TelegramStorage<Key, Value> {
     private val map: ConcurrentHashMap<Key, Value> = ConcurrentHashMap()
     fun getOrPut(key: Key, defaultValue: () -> Value): Value = map.getOrPut(key, defaultValue)
-    operator fun get(key: Key): Value = map[key] ?: error("Couldn't find $key")
+    operator fun get(key: Key): Value? = map[key]
+    fun getValue(key: Key): Value = map[key] ?: error("Couldn't find $key")
+    operator fun set(key: Key, value: Value) {
+        map[key] = value
+    }
+
+    fun remove(key: Key): Value? = map.remove(key)
     val entries: Sequence<Map.Entry<Key, Value>> get() = map.asSequence()
 
     fun forEach(action: (Key, Value) -> Unit) = map.forEach(action)

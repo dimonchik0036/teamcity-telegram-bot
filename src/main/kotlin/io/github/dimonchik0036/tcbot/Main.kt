@@ -1,5 +1,6 @@
 package io.github.dimonchik0036.tcbot
 
+import com.pengrad.telegrambot.TelegramBot
 import org.slf4j.LoggerFactory
 import java.io.FileInputStream
 import java.io.IOException
@@ -10,7 +11,7 @@ import kotlin.system.exitProcess
 fun main(args: Array<String>): Unit = try {
     val config = Config(inputValues(args))
     val bot = TeamCityTelegramBot(
-        token = config.botToken,
+        sender = TelegramBot(config.botToken),
         creatorId = config.creatorId,
         authKey = config.authKey,
         commands = ALL_COMMANDS.associate { it.name to it }
