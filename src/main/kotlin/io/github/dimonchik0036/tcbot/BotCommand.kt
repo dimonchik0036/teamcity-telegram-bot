@@ -160,16 +160,16 @@ private fun BotCommand.filter(
     chat: TelegramChat,
     message: Message
 ) {
-    val args = message.commandArguments
+    val args = message.commandArgumentsList
     val filter = chat.filter
-    val filterName = args.substringBefore(' ')
-    val text = if (!Filter.isFilterName(filterName)) help
-    else createFilter(args.substringAfter(' ')) { filter.setFilterByName(filterName, it) }
+    val filterName = args.firstOrNull() ?: ""
+    val pattern = args.getOrNull(1)
+    val text = if (!Filter.isFilterName(filterName) || pattern == null) help
+    else createFilter(pattern) { filter.setFilterByName(filterName, it) }
     bot.sendTextMessage(text, chat, message)
 }
 
-private fun createFilter(pattern: String, onSuccess: (Regex) -> Unit): String = if (pattern.isEmpty()) "Empty pattern"
-else try {
+private fun createFilter(pattern: String, onSuccess: (Regex) -> Unit): String = try {
     val regex = Regex(pattern)
     onSuccess(regex)
     BotCommand.SUCCESS

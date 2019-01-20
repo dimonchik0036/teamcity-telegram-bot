@@ -100,6 +100,18 @@ class TeamCityTest {
     }
 
     @Test
+    fun `test invalid filter`() = doTest(withAuth = true) {
+        val command = "filter"
+        val help = ALL_COMMANDS.first { it.name == command }.help
+        sender.send(createUpdate(command = command))
+        assertEquals(help, receiveText())
+        sender.send(createUpdate(command = command, textOrArguments = "branch"))
+        assertEquals(help, receiveText())
+        sender.send(createUpdate(command = command, textOrArguments = "???"))
+        assertEquals(help, receiveText())
+    }
+
+    @Test
     fun `test invalid filter check`() = doTest(withAuth = true) {
         val command = "filter_check"
         val help = ALL_COMMANDS.first { it.name == command }.help
