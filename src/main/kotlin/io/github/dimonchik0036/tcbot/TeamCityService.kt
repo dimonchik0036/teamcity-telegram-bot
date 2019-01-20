@@ -150,13 +150,13 @@ class TeamCityService(
         .all()
 
     private fun getNewBuilds(configurationId: BuildConfigurationId): Sequence<Build> = teamCityInstance.builds()
-            .fromConfiguration(configurationId)
-            .includeCanceled()
-            .includeFailed()
-            .includeRunning()
-            .withAllBranches()
-            .since(lastUpdate) // TODO: Replace with sinceBuild. Now this filter is not implemented in the teamcity-rest-client.
-            .all()
+        .fromConfiguration(configurationId)
+        .includeCanceled()
+        .includeFailed()
+        .includeRunning()
+        .withAllBranches()
+        .since(lastUpdate) // TODO: Replace with sinceBuild. Now this filter is not implemented in the teamcity-rest-client.
+        .all()
 
     private suspend fun startCheckProjectStructure() {
         try {

@@ -73,43 +73,32 @@ class TeamCityTest {
         assertNull(bot.userStorage[creatorId.toInt()])
         login()
         logout()
+        assertNotNull(bot.chatStorage[creatorId])
+        assertNotNull(bot.userStorage[creatorId.toInt()])
     }
 
     @Test
     fun `test bad auth`() = doTest {
-        sender.send(createUpdate("", creatorId, creatorId.toInt(), creatorUsername, "login"))
-        sender.send(createUpdate("12", creatorId, creatorId.toInt(), creatorUsername, "login"))
+        sender.send(createUpdate(command = "login"))
         assertEquals(failedAuth, receiver.receive())
+        sender.send(createUpdate(command = "login", textOrArguments = "12"))
         assertEquals(failedAuth, receiver.receive())
         assertFalse(bot.chatStorage.getValue(creatorId).isAuth)
     }
 
     @Test
     fun `test not permitted`() = doTest {
-        logout()
-        sender.send(createUpdate("", creatorId, creatorId.toInt(), creatorUsername, "filter"))
+        sender.send(createUpdate(command = "filter"))
         assertEquals(notPermitted, receiver.receive())
     }
 
     @Test
-    fun `test filter`() = doTest {
-        login()
-        val filter = resetFilter()
-        filter.setFilterByName("branch", Regex("rr/.*"))
-        checkMessage(
-            baseSet = myRandomBuilds,
-            sendAction = bot::buildInfoHandler,
-            baseTransformer = TeamCityBuild::markdownDescription,
-            requestTransformer = Request::text,
-            baseFilter = filter::matches,
-            expectedCount = 3
-        )
-        resetFilter()
+    fun `test filter`() {
+        testFilter("branch", "rr/.*")
     }
 
     @Test
-    fun `test simple`() = doTest(timeout = 10_000) {
-        login()
+    fun `test simple`() = doTest(timeout = 5_000, withAuth = true) {
         val builds = generateBuilds(10)
         checkMessage(
             baseSet = builds,
@@ -120,34 +109,58 @@ class TeamCityTest {
     }
 
     @Test
-    fun `test running`() = doTest {
-        login()
-        val filter = resetFilter()
-        filter.setFilterByName("branch", Regex("rr/.*"))
+    fun `test running`() = doTest(withAuth = true) {
+        addFilter("branch", "rr/.*")
 
         var running = getRunningBuilds("all")
         var expected = myRunningBuilds.map(TeamCityBuild::markdownDescription).toSet()
         assertEquals(expected, running)
 
+        val filter = getFilter()
         running = getRunningBuilds("")
         expected = myRunningBuilds.filter(filter::matches).map(TeamCityBuild::markdownDescription).toSet()
         assertEquals(expected, running)
+    }
 
-        resetFilter()
+    private fun testFilter(filterName: String, pattern: String) = doTest(withAuth = true) {
+        val expectedFilter = Filter()
+        expectedFilter.setFilterByName(filterName, Regex(pattern))
+        val expected = myRandomBuilds.filter(expectedFilter::matches).toSet()
+
+        addFilter(filterName, pattern)
+        val actualFilter = getFilter()
+        val actual = myRandomBuilds.filter(actualFilter::matches).toSet()
+
+        assertEquals(expected, actual)
+
+        checkMessage(
+            baseSet = myRandomBuilds,
+            sendAction = bot::buildInfoHandler,
+            baseTransformer = TeamCityBuild::markdownDescription,
+            requestTransformer = Request::text,
+            baseFilter = actualFilter::matches,
+            expectedCount = 3
+        )
+    }
+
+    private suspend fun addFilter(filterName: String, pattern: String) {
+        sender.send(createUpdate(command = "filter", textOrArguments = "$filterName $pattern"))
+        assertEquals(receiver.receive().text, BotCommand.SUCCESS)
     }
 
     private suspend fun getRunningBuilds(filter: String): Set<String> {
-        sender.send(createUpdate(filter, creatorId, creatorId.toInt(), creatorUsername, "running"))
+        sender.send(createUpdate(command = "running", textOrArguments = filter))
         return receiver.receive().text.split("\n\n").toSet()
     }
 
-    private fun resetFilter(): Filter {
-        val chat = bot.chatStorage.getValue(creatorId)
+    private fun getFilter(): Filter = bot.chatStorage.getValue(creatorId).filter
+
+    private fun resetFilter() {
+        val chat = bot.chatStorage[creatorId] ?: return
         val filter = chat.filter
         for (name in Filter.FILTER_NAMES) {
             assertTrue(filter.setFilterByName(name, Filter.DEFAULT_FILTER))
         }
-        return filter
     }
 
     private suspend fun <T, R> checkMessage(
@@ -171,9 +184,16 @@ class TeamCityTest {
         assertEquals(expected, requests)
     }
 
-    private fun doTest(timeout: Long = 3_000, block: suspend CoroutineScope.() -> Unit) = runBlocking {
+    private fun doTest(
+        timeout: Long = 3_000,
+        withAuth: Boolean = false,
+        block: suspend CoroutineScope.() -> Unit
+    ) = runBlocking {
+        resetFilter()
         withTimeout(timeout) {
+            if (withAuth) login()
             block()
+            if (withAuth) logout()
         }
     }
 
@@ -181,24 +201,14 @@ class TeamCityTest {
     private val failedAuth = Request(creatorId, BotCommand.FAILED_AUTH)
     private val notPermitted = Request(creatorId, BotCommand.NOT_PERMITTED)
     private val logoutRequest = Request(creatorId, BotCommand.LOGOUT_MESSAGE)
-    private suspend fun CoroutineScope.login() {
-        launch {
-            sender.send(
-                createUpdate(
-                    " ${config.authKey}",
-                    creatorId,
-                    creatorId.toInt(),
-                    creatorUsername,
-                    "login"
-                )
-            )
-        }
+    private suspend fun login() {
+        sender.send(createUpdate(command = "login", textOrArguments = "${config.authKey}"))
         assertEquals(successAuth, receiver.receive())
         assertTrue(bot.chatStorage.getValue(creatorId).isAuth)
     }
 
-    private suspend fun CoroutineScope.logout() {
-        launch { sender.send(createUpdate("", creatorId, creatorId.toInt(), creatorUsername, "logout")) }
+    private suspend fun logout() {
+        sender.send(createUpdate(command = "logout"))
         assertEquals(logoutRequest, receiver.receive())
         assertFalse(bot.chatStorage.getValue(creatorId).isAuth)
     }
@@ -211,7 +221,7 @@ class TeamCityTest {
         return set
     }
 
-    var buildId = 42
+    private var buildId = 42
     private fun createBuild(
         state: BuildState = BuildState.RUNNING,
         status: BuildStatus? = BuildStatus.SUCCESS,
@@ -232,29 +242,23 @@ class TeamCityTest {
             buildConfigurationId = buildConfigurationId
         )
     }
-}
 
-data class Request(
-    val chatId: Long,
-    val text: String
-)
-
-fun createUpdate(
-    textOrArguments: String,
-    chatId: Long,
-    userId: Int,
-    username: String,
-    command: String? = null
-): String {
-    val resultText = if (command != null) {
-        """"/$command $textOrArguments", "entities": [ {
+    private fun createUpdate(
+        command: String? = null,
+        textOrArguments: String = "",
+        chatId: Long = creatorId,
+        userId: Int = creatorId.toInt(),
+        username: String = creatorUsername
+    ): String {
+        val resultText = if (command != null) {
+            """"/$command $textOrArguments", "entities": [ {
             "type":"bot_command",
             "offset": 0,
             "length":${command.length + 1}
         }]
             """
-    } else textOrArguments
-    return """
+        } else textOrArguments
+        return """
     {
        "message": {
             "message_id":1,
@@ -271,9 +275,15 @@ fun createUpdate(
        }
    }
 """
+    }
 }
 
-class MockTelegramBot(
+private data class Request(
+    val chatId: Long,
+    val text: String
+)
+
+private class MockTelegramBot(
     token: String,
     private val outChannel: Channel<Request>,
     private val inChannel: Channel<String>

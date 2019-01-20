@@ -33,6 +33,8 @@ data class BotCommand(
         const val FAILED_AUTH = "$FAILED_EMOJI Bad auth key"
         const val NOT_PERMITTED = "$NOT_PERMITTED_EMOJI Not permitted"
         const val LOGOUT_MESSAGE = "Notifications disabled"
+        const val SUCCESS = "$SUCCESS_EMOJI Success"
+        const val FAILED = "$FAILED_EMOJI Failed"
     }
 }
 
@@ -170,7 +172,7 @@ private fun createFilter(pattern: String, onSuccess: (Regex) -> Unit): String = 
 else try {
     val regex = Regex(pattern)
     onSuccess(regex)
-    "Success"
+    BotCommand.SUCCESS
 } catch (e: PatternSyntaxException) {
     "Syntax error"
 }
