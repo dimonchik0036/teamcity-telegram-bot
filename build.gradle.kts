@@ -21,6 +21,7 @@ dependencies {
     compile("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.1.0")
     testCompile("org.jetbrains.kotlin:kotlin-test")
     testCompile("org.jetbrains.kotlin:kotlin-test-junit")
+    testImplementation("io.mockk:mockk:1.9")
 }
 
 tasks.withType<KotlinCompile> {
