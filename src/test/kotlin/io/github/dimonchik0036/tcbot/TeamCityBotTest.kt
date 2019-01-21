@@ -123,7 +123,7 @@ class TeamCityTest {
         checkMessage(
             baseSet = builds,
             sendAction = bot::buildInfoHandler,
-            baseTransformer = TeamCityBuild::markdownDescription,
+            baseTransformer = TeamCityBuild::description,
             requestTransformer = Request::text
         )
     }
@@ -133,12 +133,12 @@ class TeamCityTest {
         addFilters("branch rr/.*")
 
         var running = getRunningBuilds("all")
-        var expected = myRunningBuilds.map(TeamCityBuild::markdownDescription).toSet()
+        var expected = myRunningBuilds.map(TeamCityBuild::description).toSet()
         assertEquals(expected, running)
 
         val filter = getFilter()
         running = getRunningBuilds("")
-        expected = myRunningBuilds.filter(filter::matches).map(TeamCityBuild::markdownDescription).toSet()
+        expected = myRunningBuilds.filter(filter::matches).map(TeamCityBuild::description).toSet()
         assertEquals(expected, running)
     }
 
@@ -168,7 +168,7 @@ class TeamCityTest {
         checkMessage(
             baseSet = myRandomBuilds,
             sendAction = bot::buildInfoHandler,
-            baseTransformer = TeamCityBuild::markdownDescription,
+            baseTransformer = TeamCityBuild::description,
             requestTransformer = Request::text,
             baseFilter = actualFilter::matches,
             expectedCount = expected.size

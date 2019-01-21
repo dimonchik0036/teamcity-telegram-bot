@@ -8,7 +8,6 @@ import com.pengrad.telegrambot.model.Update
 import com.pengrad.telegrambot.model.User
 import com.pengrad.telegrambot.model.request.ParseMode
 import com.pengrad.telegrambot.request.SendMessage
-import com.pengrad.telegrambot.response.BaseResponse
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import org.slf4j.LoggerFactory
@@ -59,7 +58,7 @@ class TeamCityTelegramBot(
         GlobalScope.launch {
             chatStorage.forEach { _, chat ->
                 if (!chat.isAuth || !chat.filter.matches(build)) return@forEach
-                sendTextMessage(build.markdownDescription, chat, parseMode = ParseMode.Markdown)
+                sendTextMessage(build.description, chat)
             }
         }
     }
@@ -76,7 +75,8 @@ class TeamCityTelegramBot(
         var message = SendMessage(chat.id, text)
         if (messageForReply != null) message = message.replyToMessageId(messageForReply.messageId())
         if (parseMode != null) message = message.parseMode(parseMode)
-        sender.execute(message).checkError(chat)
+        val response = sender.execute(message)
+        if (!response.isOk) LOG.warn("Error response on ${message.parameters} in $chat chat")
     }
     //---------------------------------------------
 
@@ -115,8 +115,4 @@ class TeamCityTelegramBot(
             LOG.info("Unknown command $command")
         }
     }
-}
-
-fun BaseResponse.checkError(chat: TelegramChat) {
-    if (!isOk) LOG.warn("Error response in $chat chat: $this")
 }

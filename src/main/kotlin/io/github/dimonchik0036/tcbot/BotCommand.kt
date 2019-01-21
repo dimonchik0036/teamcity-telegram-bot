@@ -233,8 +233,8 @@ private fun BotCommand.running(
             builds.none() -> sendTextMessage("Builds not fount", chat, message)
             // Telegram can't mark up a completely large message.
             else -> builds.chunked(10).forEach {
-                val text = it.joinToString(separator = "\n\n", transform = TeamCityBuild::markdownDescription)
-                sendTextMessage(text, chat, message, ParseMode.Markdown)
+                val text = it.joinToString(separator = "\n\n", transform = TeamCityBuild::description)
+                sendTextMessage(text, chat, message)
             }
         }
     }

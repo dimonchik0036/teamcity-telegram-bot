@@ -13,13 +13,13 @@ class TeamCityBuild(
     val status: BuildStatus?,
     val buildConfigurationId: String
 ) {
-    val markdownDescription: String = "Build name: *$name*\n" +
-            "Build number: *${number ?: "unknown"}*\n" +
-            "Build state: *${state.name}*\n" +
-            "Build status: *${status ?: "CANCELED"}*\n" +
-            "Branch name: *${branchName ?: "unknown"}*\n" +
-            "Last author: *${lastAuthor ?: "unknown"}*\n" +
-            "Full description: [open]($url)"
+    val description: String = "Build name: $name\n" +
+            "Build number: ${number ?: "unknown"}\n" +
+            "Build state: ${state.name}\n" +
+            "Build status: ${status ?: "CANCELED"}\n" +
+            "Branch name: ${branchName ?: "unknown"}\n" +
+            "Last author: ${lastAuthor ?: "unknown"}\n" +
+            "Full description: $url"
 
     override fun equals(other: Any?): Boolean = when {
         this === other -> true
