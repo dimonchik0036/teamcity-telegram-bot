@@ -150,6 +150,8 @@ class TeamCityService(
     private fun getRunningBuilds(configurationId: BuildConfigurationId): Sequence<Build> = teamCityInstance.builds()
         .fromConfiguration(configurationId)
         .onlyRunning()
+        .includeFailed()
+        .withAllBranches()
         .all()
 
     private fun getNewBuilds(configurationId: BuildConfigurationId): Sequence<Build> = teamCityInstance.builds()
