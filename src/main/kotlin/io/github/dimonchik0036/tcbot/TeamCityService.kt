@@ -1,6 +1,9 @@
 package io.github.dimonchik0036.tcbot
 
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.teamcity.rest.*
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -114,7 +117,7 @@ class TeamCityService(
     }
 
     private fun checkRunningBuilds() {
-        LOG.debug("Start check running builds")
+        LOG.info("Start check running builds")
         runningBuilds.forEach {
             val build = teamCityInstance.build(BuildId(it.id))
             if (build.state == BuildState.RUNNING) {
@@ -129,7 +132,7 @@ class TeamCityService(
             buildHandle(TeamCityBuild.fromBuild(build))
             myRunningBuilds -= it
         }
-        LOG.debug("End check running builds")
+        LOG.info("End check running builds")
     }
 
     private fun buildHandle(build: TeamCityBuild) {
@@ -159,18 +162,15 @@ class TeamCityService(
         .all()
 
     private suspend fun startCheckProjectStructure() {
-        try {
-            checkProjectStructure()
-            initRunningBuilds()
-            while (true) {
+        checkProjectStructure()
+        initRunningBuilds()
+        while (true) {
+            try {
                 checkProjectStructure()
-                delay(checkProjectDelayMillis)
+            } catch (e: Exception) {
+                LOG.warn("Error on check project structure", e)
             }
-        } catch (e: CancellationException) {
-            LOG.debug("Cancel")
-            return
-        } catch (e: Exception) {
-            LOG.warn("Error on check project structure", e)
+            delay(checkProjectDelayMillis)
         }
     }
 
@@ -190,12 +190,12 @@ class TeamCityService(
     }
 
     private fun checkProjectStructure() {
-        LOG.debug("Start check project structure")
+        LOG.info("Start check project structure")
 
         val map = hashMapOf<Project, List<BuildConfiguration>>()
         fillProjectStructure(rooProjects, map)
         projectStructure = map
 
-        LOG.debug("End check project structure")
+        LOG.info("End check project structure")
     }
 }
